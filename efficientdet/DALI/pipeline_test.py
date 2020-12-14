@@ -1,29 +1,65 @@
-from pipeline import EfficientDetPipeline
-
 import matplotlib.pyplot as plt
 
-import os
+import os, sys
 
-dali_extra = os.environ['DALI_EXTRA_PATH']
-file_root = os.path.join(dali_extra, 'db', 'coco', 'images')
-annotations_file = os.path.join(dali_extra, 'db', 'coco', 'instances.json')
+def run_dali():
 
-batch_size = 32
-image_size = (640, 480)
-num_threads = 1
-device_id = 0
-seed = int.from_bytes(os.urandom(4), 'little')
+    from DALI.pipeline import EfficientDetPipeline
 
-pipeline = EfficientDetPipeline(
-    file_root, annotations_file,
-    batch_size, image_size,
-    num_threads, device_id, seed)
+    dali_extra = os.environ['DALI_EXTRA_PATH']
+    file_root = os.path.join(dali_extra, 'db', 'coco', 'images')
+    annotations_file = os.path.join(dali_extra, 'db', 'coco', 'instances.json')
 
-pipeline.build()
+    batch_size = 8
+    image_size = (640, 640)
+    num_threads = 1
+    device_id = 0
+    seed = int.from_bytes(os.urandom(4), 'little')
 
-images, labels = pipeline.run()
+    pipeline = EfficientDetPipeline(
+        file_root, annotations_file,
+        batch_size, image_size,
+        num_threads, device_id, seed
+    )
 
-for i, image in enumerate(images):
-    plt.imshow(image)
-    plt.savefig('out/image' + str(i) + '.png')
-    plt.clf()
+    pipeline.build()
+
+    images, labels = pipeline.run()
+
+    for i, image in enumerate(images):
+        plt.imshow(image)
+        plt.savefig('dali/image' + str(i) + '.png')
+        plt.clf()
+
+
+def run_recon(tfrecord_pattern):
+
+    from dataloader import InputReader
+    from hparams_config import default_detection_configs
+
+    train_input_fn = InputReader(
+        tfrecord_pattern,
+        is_training=True,
+        use_fake_data=False,
+        max_instances_per_image=100
+    )
+
+    params = default_detection_configs()
+    params.image_size = 640
+    params.grid_mask = False
+
+    dataset = train_input_fn(params, batch_size=32)
+
+    for i, elem in enumerate(dataset.take(8)):
+        images, labels = elem
+        plt.imshow(images[0])
+        plt.savefig('recon/out' + str(i) + '.png')
+        plt.clf()
+#        print(labels)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 2 and sys.argv[1] == 'recon':
+        run_recon(sys.argv[2])
+    else:
+        run_dali()
