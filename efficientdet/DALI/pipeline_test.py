@@ -24,9 +24,12 @@ def run_dali():
 
     pipeline.build()
 
-    images, labels = pipeline.run()
+    images, enc_bboxes, enc_labels = pipeline.run()
 
     for i, image in enumerate(images):
+        for j in range(len(enc_labels.at(i))):
+            if enc_labels.at(i)[j] != 0:
+                print(j, ':', enc_labels.at(i)[j], enc_bboxes.at(i)[j])
         plt.imshow(image)
         plt.savefig('dali/image' + str(i) + '.png')
         plt.clf()

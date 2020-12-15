@@ -5,6 +5,9 @@ import nvidia.dali.types as types
 import nvidia.dali.plugin.tf as dali_tf
 import tensorflow as tf
 
+from keras import anchors
+
+
 class EfficientDetPipeline(Pipeline):
     def __init__(self, file_root, annotations_file,
                  batch_size, image_size,
@@ -17,6 +20,14 @@ class EfficientDetPipeline(Pipeline):
         )
 
         self.image_size = image_size
+        self.boxes = anchors.Anchors(3, 7, 3, [1.0, 2.0, 0.5], 1.0, image_size).boxes
+        boxes_l = self.boxes[: ,0] / image_size[0]
+        boxes_t = self.boxes[: ,1] / image_size[1]
+        boxes_r = self.boxes[: ,2] / image_size[0]
+        boxes_b = self.boxes[:, 3] / image_size[1]
+        self.boxes = tf.transpose(tf.stack([boxes_l, boxes_t, boxes_r, boxes_b]))
+        self.boxes = tf.reshape(self.boxes, self.boxes.shape[0] * 4).numpy().tolist()
+        self.box_encode = ops.BoxEncoder(anchors=self.boxes)
 
         self.input = ops.COCOReader(
             file_root = file_root,
@@ -59,11 +70,11 @@ class EfficientDetPipeline(Pipeline):
         images = self.slice(images, anchors, shapes)
         images = self.resize(images)
 
-        # AnchorLabeler
+        enc_bboxes, enc_labels = self.box_encode(bboxes, labels)
 
         # Prepare output
 
-        return images, labels
+        return images, enc_bboxes, enc_labels
 
     def __call__(self, params):
         dataset = dali_tf.DALIDataset(
