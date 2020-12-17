@@ -19,15 +19,12 @@ class EfficientDetPipeline(Pipeline):
             seed
         )
 
-        self.image_size = image_size
-        self.boxes = anchors.Anchors(3, 7, 3, [1.0, 2.0, 0.5], 1.0, image_size).boxes
-        boxes_l = self.boxes[: ,0] / image_size[0]
-        boxes_t = self.boxes[: ,1] / image_size[1]
-        boxes_r = self.boxes[: ,2] / image_size[0]
-        boxes_b = self.boxes[:, 3] / image_size[1]
-        self.boxes = tf.transpose(tf.stack([boxes_l, boxes_t, boxes_r, boxes_b]))
-        self.boxes = tf.reshape(self.boxes, self.boxes.shape[0] * 4).numpy().tolist()
-        self.box_encode = ops.BoxEncoder(anchors=self.boxes)
+        self._image_size = image_size
+
+        self._anchors = anchors.Anchors(3, 7, 3, [1.0, 2.0, 0.5], 4.0, image_size)
+        self._boxes = self._get_boxes()
+
+        self.box_encode = ops.BoxEncoder(anchors=self._boxes)
 
         self.input = ops.COCOReader(
             file_root = file_root,
@@ -52,12 +49,46 @@ class EfficientDetPipeline(Pipeline):
             allow_no_crop=False
         )
         self.slice = ops.Slice(out_of_bounds_policy='pad')
-        self.resize = ops.Resize(resize_x=self.image_size[0], resize_y=self.image_size[1])
+        self.slice2D = ops.Slice(axes=[0,1])
+        self.slice1D = ops.Slice(axes=[0])
+        self.reshape = ops.Reshape()
+        self.resize = ops.Resize(resize_x=self._image_size[0], resize_y=self._image_size[1])
         self.coin_flip = ops.CoinFlip()
 
+    def _get_boxes(self):
+        boxes_l = self._anchors.boxes[: ,0] / self._image_size[0]
+        boxes_t = self._anchors.boxes[: ,1] / self._image_size[1]
+        boxes_r = self._anchors.boxes[: ,2] / self._image_size[0]
+        boxes_b = self._anchors.boxes[:, 3] / self._image_size[1]
+        boxes = tf.transpose(tf.stack([boxes_l, boxes_t, boxes_r, boxes_b]))
+        return tf.reshape(boxes, boxes.shape[0] * 4).numpy().tolist()
+
+    def _unpack_labels(self, enc_bboxes, enc_classes):
+        # from keras/anchors.py
+
+        enc_bboxes_layers = []
+        enc_classes_layers = []
+
+        count = 0
+        for level in range(self._anchors.min_level, self._anchors.max_level + 1):
+            feat_size = self._anchors.feat_sizes[level]
+            steps = feat_size['height'] * feat_size['width'] * self._anchors.get_anchors_per_location()
+
+            enc_bboxes_layers.append(self.reshape(
+                    self.slice2D(enc_bboxes, (count, 0), (steps, 4)), [feat_size['height'], feat_size['width'], -1])
+            )
+            enc_classes_layers.append(self.reshape(
+                    self.slice1D(enc_classes, count, steps), [feat_size['height'], feat_size['width'], -1])
+            )
+
+            count += steps
+
+        return enc_bboxes_layers, enc_classes_layers
+
     def define_graph(self):
-        # skip_crowd_during_training
-        inputs, bboxes, labels = self.input()
+
+        #read input
+        inputs, bboxes, classes = self.input() # skip_crowd_during_training
         images = self.decode(inputs)
 
         # grid_mask
@@ -70,11 +101,21 @@ class EfficientDetPipeline(Pipeline):
         images = self.slice(images, anchors, shapes)
         images = self.resize(images)
 
-        enc_bboxes, enc_labels = self.box_encode(bboxes, labels)
+        # label anchors
+        enc_bboxes, enc_classes = self.box_encode(bboxes, classes)
+        # enc_bboxes are in [x, y, w, h] format ???
 
-        # Prepare output
+        # spliting labels into feature size classes
+        enc_bboxes_layers, enc_classes_layers = self._unpack_labels(enc_bboxes, enc_classes)
 
-        return images, enc_bboxes, enc_labels
+        # no way to return values as dictionary (like original efficientdet impl does)
+
+        return (images,
+            enc_classes_layers[0], enc_bboxes_layers[0],
+            enc_classes_layers[1], enc_bboxes_layers[1],
+            enc_classes_layers[2], enc_bboxes_layers[2],
+            enc_classes_layers[3], enc_bboxes_layers[3],
+            enc_classes_layers[4], enc_bboxes_layers[4]) #mean_num_positives, source_ids, groundtruth_data, image_scales, image_masks
 
     def __call__(self, params):
         dataset = dali_tf.DALIDataset(

@@ -11,7 +11,7 @@ def run_dali():
     annotations_file = os.path.join(dali_extra, 'db', 'coco', 'instances.json')
 
     batch_size = 8
-    image_size = (640, 640)
+    image_size = (256, 256)
     num_threads = 1
     device_id = 0
     seed = int.from_bytes(os.urandom(4), 'little')
@@ -24,12 +24,9 @@ def run_dali():
 
     pipeline.build()
 
-    images, enc_bboxes, enc_labels = pipeline.run()
+    images, cls_3, box_3, cls_4, box_4, cls_5, box_5, cls_6, box_6, cls_7, box_7 = pipeline.run()
 
     for i, image in enumerate(images):
-        for j in range(len(enc_labels.at(i))):
-            if enc_labels.at(i)[j] != 0:
-                print(j, ':', enc_labels.at(i)[j], enc_bboxes.at(i)[j])
         plt.imshow(image)
         plt.savefig('dali/image' + str(i) + '.png')
         plt.clf()
@@ -48,17 +45,18 @@ def run_recon(tfrecord_pattern):
     )
 
     params = default_detection_configs()
-    params.image_size = 640
+    params.image_size = 256
     params.grid_mask = False
 
     dataset = train_input_fn(params, batch_size=32)
 
     for i, elem in enumerate(dataset.take(8)):
         images, labels = elem
+        print(labels.keys())
+        quit()
         plt.imshow(images[0])
         plt.savefig('recon/out' + str(i) + '.png')
         plt.clf()
-#        print(labels)
 
 
 if __name__ == "__main__":
