@@ -120,6 +120,8 @@ class EfficientDetPipeline(Pipeline):
             labels['cls_targets_%d' % level] = cls_box_args[i]
             labels['box_targets_%d' % level] = cls_box_args[i + 1]
 
+        labels['mean_num_positives'] = 0.0
+
         return images, labels
 
     def __call__(self, params):
@@ -129,9 +131,10 @@ class EfficientDetPipeline(Pipeline):
 
         for level in range(self._anchors.min_level, self._anchors.max_level + 1):
             feat_size = self._anchors.feat_sizes[level]
-            steps = feat_size['height'] * feat_size['width'] * self._anchors.get_anchors_per_location()
-            output_shapes.append((self.batch_size, steps))
-            output_shapes.append((self.batch_size, steps, 4))
+            output_shapes.append((self.batch_size, feat_size['height'],
+                feat_size['width'], self._anchors.get_anchors_per_location()))
+            output_shapes.append((self.batch_size, feat_size['height'],
+                feat_size['width'], self._anchors.get_anchors_per_location() * 4))
             output_dtypes.append(tf.int32)
             output_dtypes.append(tf.float32)
 
