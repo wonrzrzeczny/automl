@@ -112,9 +112,19 @@ class EfficientDetPipeline(Pipeline):
         enc_layers = [item for pair in zip(enc_classes_layers, enc_bboxes_layers) for item in pair]
         return (images, *enc_layers) #mean_num_positives, source_ids, groundtruth_data, image_scales, image_masks
 
+    def _format_data(self, batch_size, images, *cls_box_args):
+        labels = {}
+
+        for level in range(self._anchors.min_level, self._anchors.max_level + 1):
+            i = 2 * (level - self._anchors.min_level)
+            labels['cls_targets_%d' % level] = cls_box_args[i]
+            labels['box_targets_%d' % level] = cls_box_args[i + 1]
+
+        return images, labels
+
     def __call__(self, params):
 
-        output_shapes = [(self.batch_size, self.image_size[0], self.image_size[1], 3)]
+        output_shapes = [(self.batch_size, self._image_size[0], self._image_size[1], 3)]
         output_dtypes = [tf.float32]
 
         for level in range(self._anchors.min_level, self._anchors.max_level + 1):
@@ -131,4 +141,7 @@ class EfficientDetPipeline(Pipeline):
             output_shapes=tuple(output_shapes),
             output_dtypes=tuple(output_dtypes)
         )
+        dataset = dataset.map(
+            lambda *args: self._format_data(self.batch_size, *args))
+
         return dataset

@@ -298,6 +298,30 @@ def main(_):
     if FLAGS.eval_after_training:
       eval_est.evaluate(input_fn=eval_input_fn, steps=eval_steps)
 
+  elif FLAGS.mode == 'train_dali':
+    from DALI.pipeline import EfficientDetPipeline
+
+    print()
+    print("Currently reading files from DALI_EXTRA_PATH")
+    print()
+    dali_extra = os.environ['DALI_EXTRA_PATH']
+    file_root = os.path.join(dali_extra, 'db', 'coco', 'images')
+    annotations_file = os.path.join(dali_extra, 'db', 'coco', 'instances.json')
+
+    batch_size = FLAGS.train_batch_size
+    image_size = config.image_size
+    num_threads = 1
+    device_id = 0
+    seed = int.from_bytes(os.urandom(4), 'little')
+
+    pipeline = EfficientDetPipeline(
+        file_root, annotations_file,
+        batch_size, image_size,
+        num_threads, device_id, seed
+    )
+
+    train_est.train(input_fn=pipeline, max_steps=train_steps)
+
   elif FLAGS.mode == 'eval':
     # Run evaluation when there's a new checkpoint
     for ckpt in tf.train.checkpoints_iterator(
