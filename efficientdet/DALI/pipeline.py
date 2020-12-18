@@ -87,7 +87,6 @@ class EfficientDetPipeline(Pipeline):
 
     def define_graph(self):
 
-        #read input
         inputs, bboxes, classes = self.input() # skip_crowd_during_training
         images = self.decode(inputs)
 
@@ -106,22 +105,30 @@ class EfficientDetPipeline(Pipeline):
         # enc_bboxes are in [x, y, w, h] format ???
 
         # spliting labels into feature size classes
-        enc_bboxes_layers, enc_classes_layers = self._unpack_labels(enc_bboxes, enc_classes)
+        enc_bboxes_layers, enc_classes_layers = \
+            self._unpack_labels(enc_bboxes, enc_classes)
 
         # no way to return values as dictionary (like original efficientdet impl does)
-
-        return (images,
-            enc_classes_layers[0], enc_bboxes_layers[0],
-            enc_classes_layers[1], enc_bboxes_layers[1],
-            enc_classes_layers[2], enc_bboxes_layers[2],
-            enc_classes_layers[3], enc_bboxes_layers[3],
-            enc_classes_layers[4], enc_bboxes_layers[4]) #mean_num_positives, source_ids, groundtruth_data, image_scales, image_masks
+        enc_layers = [item for pair in zip(enc_classes_layers, enc_bboxes_layers) for item in pair]
+        return (images, *enc_layers) #mean_num_positives, source_ids, groundtruth_data, image_scales, image_masks
 
     def __call__(self, params):
+
+        output_shapes = [(self.batch_size, self.image_size[0], self.image_size[1], 3)]
+        output_dtypes = [tf.float32]
+
+        for level in range(self._anchors.min_level, self._anchors.max_level + 1):
+            feat_size = self._anchors.feat_sizes[level]
+            steps = feat_size['height'] * feat_size['width'] * self._anchors.get_anchors_per_location()
+            output_shapes.append((self.batch_size, steps))
+            output_shapes.append((self.batch_size, steps, 4))
+            output_dtypes.append(tf.int32)
+            output_dtypes.append(tf.float32)
+
         dataset = dali_tf.DALIDataset(
-          pipeline = self,
-          batch_size = self.batch_size,
-          output_shapes=((self.batch_size, self.image_size[0], self.image_size[1], 3), (self.batch_size, 100)),
-          output_dtypes = (tf.float32, tf.float32)
+            pipeline = self,
+            batch_size = self.batch_size,
+            output_shapes=tuple(output_shapes),
+            output_dtypes=tuple(output_dtypes)
         )
         return dataset
