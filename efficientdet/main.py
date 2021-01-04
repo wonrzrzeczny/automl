@@ -299,7 +299,7 @@ def main(_):
       eval_est.evaluate(input_fn=eval_input_fn, steps=eval_steps)
 
   elif FLAGS.mode == 'train_dali':
-    from DALI.pipeline import EfficientDetPipeline
+    from DALI.fn_pipeline import EfficientDetPipeline
 
     print()
     print("Currently reading files from DALI_EXTRA_PATH")
