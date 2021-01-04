@@ -26,10 +26,10 @@ class EfficientDetPipeline():
         self._boxes = self._get_boxes()
 
         self._pipe = dali.pipeline.Pipeline(
-            batch_size=batch_size,
-            num_threads=num_threads,
-            device_id=device_id,
-            seed=seed
+            batch_size = batch_size,
+            num_threads = num_threads,
+            device_id = device_id,
+            seed = seed
         )
         self._define_pipeline()
 
@@ -45,22 +45,15 @@ class EfficientDetPipeline():
 
     def _define_pipeline(self):
         with self._pipe:
-            inputs, bboxes, classes = dali.fn.coco_reader(
-                file_root = self._file_root,
-                annotations_file = self._annotations_file,
-                ltrb = True,
-                shard_id = self._device_id,
-                num_shards = self._num_threads,
-                ratio = True,
-                random_shuffle = True
+            images, bboxes, classes = ops.input(
+                self._file_root,
+                self._annotations_file,
+                self._device_id,
+                self._num_threads
             )
-            images = dali.fn.image_decoder(inputs, device = 'cpu', output_type = dali.types.RGB)
-
 
             images, bboxes = ops.normalize_flip(images, bboxes)
-            images, bboxes, classes = ops.random_crop(images, bboxes, classes)
-            images = dali.fn.resize(images,
-                resize_x = self._image_size[0], resize_y = self._image_size[1])
+            images, bboxes, classes = ops.random_crop_resize(images, bboxes, classes, self._image_size)
 
             enc_bboxes, enc_classes = dali.fn.box_encoder(bboxes, classes, anchors = self._boxes)
             # split into layers by size
