@@ -36,34 +36,39 @@ def random_crop_resize(images, bboxes, classes, output_size, scaling=[0.1, 2.0])
     images = dali.fn.slice(images, anchors, shapes, out_of_bounds_policy = 'pad')
     images = dali.fn.resize(images, resize_x = output_size[0], resize_y = output_size[1])
 
-    # scale_factor = dali.fn.uniform(range=scaling)
-    # scaled_x = scale_factor * output_size[0]
-    # scaled_y = scale_factor * output_size[1]
-    #
-    # input_size = dali.fn.shapes(images, dtype=dali.types.INT32)
-    # width = dali.fn.slice(input_size, 1, 1, axes=[0])
-    # height = dali.fn.slice(input_size, 0, 1, axes=[0])
-    # image_scale = dali.math.min(scaled_x / width, scaled_y / height)
-    #
-    # scaled_width = width * image_scale
-    # scaled_height = height * image_scale
-    # #offset_x = dali.math.max(0, scaled_width - output_size[0]) * dali.fn.uniform()
-    # #offset_y = dali.math.max(0, scaled_height - output_size[1]) * dali.fn.uniform()
-    #
-    # crop_shape = dali.fn.cast(dali.fn.constant(idata=output_size) / image_scale, dtype=dali.types.INT32)
-    #
-    # anchors, shapes, bboxes, classes = dali.fn.random_bbox_crop(
-    #     bboxes, classes,
-    #     crop_shape = crop_shape,
-    #     input_shape = dali.fn.cat(width, height),
-    #     bbox_layout = "xyXY",
-    #     allow_no_crop = False
-    # )
-    # anchors = dali.fn.cast(anchors, dtype=dali.types.INT32)
-    # shapes = dali.fn.cast(shapes, dtype=dali.types.INT32)
-    # images = dali.fn.slice(images, anchors, shapes,
-    #     out_of_bounds_policy = 'pad')
-    #
-    # images = dali.fn.resize(images, resize_x = output_size[0], resize_y = output_size[1])
+    return images, bboxes, classes
+
+def random_crop_resize_2(images, bboxes, classes, output_size, scaling=[0.1, 2.0]):
+
+    # not working due to RandomBBoxCrop bug
+    scale_factor = dali.fn.uniform(range=scaling)
+    scaled_x = scale_factor * output_size[0]
+    scaled_y = scale_factor * output_size[1]
+
+    input_size = dali.fn.shapes(images, dtype=dali.types.INT32)
+    width = dali.fn.slice(input_size, 1, 1, axes=[0])
+    height = dali.fn.slice(input_size, 0, 1, axes=[0])
+    image_scale = dali.math.min(scaled_x / width, scaled_y / height)
+
+    scaled_width = width * image_scale
+    scaled_height = height * image_scale
+    #offset_x = dali.math.max(0, scaled_width - output_size[0]) * dali.fn.uniform()
+    #offset_y = dali.math.max(0, scaled_height - output_size[1]) * dali.fn.uniform()
+
+    images = dali.fn.resize(images, resize_x = scaled_width, resize_y = scaled_height)
+
+    crop_shape = dali.fn.constant(idata = output_size)
+
+    anchors, shapes, bboxes, classes = dali.fn.random_bbox_crop(
+        bboxes, classes,
+        crop_shape = crop_shape,
+        input_shape = dali.fn.cast(dali.fn.cat(scaled_width, scaled_height), dtype=dali.types.INT32),
+        bbox_layout = "xyXY",
+        allow_no_crop = False
+    )
+    anchors = dali.fn.cast(anchors, dtype=dali.types.INT32)
+    shapes = dali.fn.cast(shapes, dtype=dali.types.INT32)
+    images = dali.fn.slice(images, anchors, shapes,
+        out_of_bounds_policy = 'pad')
 
     return images, bboxes, classes
