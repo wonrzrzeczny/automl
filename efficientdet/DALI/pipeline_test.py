@@ -80,6 +80,7 @@ def run_tf(tfrecord_pattern):
     params = default_detection_configs()
     params.image_size = 256
     params.grid_mask = False
+    params.tf_random_seed = 1234
 
     dataset = train_input_fn(params, batch_size=8)
 
@@ -91,8 +92,19 @@ def run_tf(tfrecord_pattern):
             plt.clf()
 
 
+def run_cmp():
+
+    dali_extra = os.environ['DALI_EXTRA_PATH']
+    file_root = os.path.join(dali_extra, 'db', 'coco', 'images')
+    annotations_file = os.path.join(dali_extra, 'db', 'coco', 'instances.json')
+
+    import pipeline_cmp
+    pipeline_cmp.run_all(file_root, annotations_file, 32, 2)
+
 if __name__ == "__main__":
-    if len(sys.argv) > 2 and sys.argv[1] == 'tf':
+    if len(sys.argv) == 3 and sys.argv[1] == 'tf':
         run_tf(sys.argv[2])
+    elif len(sys.argv) == 2 and sys.argv[1] == 'cmp':
+        run_cmp()
     else:
         run_dali_fn()

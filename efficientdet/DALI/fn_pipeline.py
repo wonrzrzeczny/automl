@@ -53,7 +53,7 @@ class EfficientDetPipeline():
             )
 
             images, bboxes = ops.normalize_flip(images, bboxes)
-            images, bboxes, classes = ops.random_crop_resize(images, bboxes, classes, self._image_size)
+            images, bboxes, classes = ops.random_crop_resize_2(images, bboxes, classes, self._image_size)
 
             enc_bboxes, enc_classes = dali.fn.box_encoder(bboxes, classes, anchors = self._boxes)
             # split into layers by size

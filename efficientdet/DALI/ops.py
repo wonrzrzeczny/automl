@@ -40,7 +40,6 @@ def random_crop_resize(images, bboxes, classes, output_size, scaling=[0.1, 2.0])
 
 def random_crop_resize_2(images, bboxes, classes, output_size, scaling=[0.1, 2.0]):
 
-    # not working due to RandomBBoxCrop bug
     scale_factor = dali.fn.uniform(range=scaling)
     scaled_x = scale_factor * output_size[0]
     scaled_y = scale_factor * output_size[1]
@@ -52,8 +51,6 @@ def random_crop_resize_2(images, bboxes, classes, output_size, scaling=[0.1, 2.0
 
     scaled_width = width * image_scale
     scaled_height = height * image_scale
-    #offset_x = dali.math.max(0, scaled_width - output_size[0]) * dali.fn.uniform()
-    #offset_y = dali.math.max(0, scaled_height - output_size[1]) * dali.fn.uniform()
 
     images = dali.fn.resize(images, resize_x = scaled_width, resize_y = scaled_height)
 
