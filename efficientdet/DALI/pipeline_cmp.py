@@ -118,7 +118,7 @@ def run_anchors(file_root, annotations_file, batch_size, steps):
     )
     with dali_pipeline:
         images, bboxes, classes = ops.input(file_root, annotations_file, 0, 1, False)
-        enc_bboxes, enc_classes = dali.fn.box_encoder(bboxes, classes, anchors = _get_boxes())
+        enc_bboxes, enc_classes = dali.fn.box_encoder(bboxes, classes, device='cpu', anchors = _get_boxes(), offset = True)
         dali_pipeline.set_outputs(images, enc_bboxes, enc_classes)
     dali_pipeline.build()
 
@@ -135,13 +135,15 @@ def run_anchors(file_root, annotations_file, batch_size, steps):
 
             cls_dali = classes_dali.at(i)
             box_dali = bboxes_dali.at(i)
+            dali_match = np.where(cls_dali != 0)[0][0]
+            tf_match = np.where(cls_tf != -1)[0][0]
 
-            np.savetxt('__dali.txt', cls_dali)
-            np.savetxt('__tf.txt', cls_tf)
+            np.savetxt('__dali.txt', box_dali)
+            np.savetxt('__tf.txt', box_tf)
 
-            print(_get_boxes()[4 * 41632 : 4 * 41632 + 4])
-            print(box_dali[41632])
-            print(bbox_tf)
+            print(_get_boxes()[4 * dali_match : 4 * dali_match + 4])
+            print(_get_boxes()[4 * tf_match : 4 * tf_match + 4])
+            print(bboxes_tf.at(i))
             quit()
 
 
