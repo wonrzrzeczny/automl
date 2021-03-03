@@ -19,6 +19,9 @@ from absl import app
 from absl import flags
 from absl import logging
 import numpy as np
+from silence_tensorflow import silence_tensorflow
+#silence_tensorflow()
+#logging.set_verbosity(logging.WARNING)
 import tensorflow.compat.v1 as tf
 
 import dataloader
@@ -94,6 +97,8 @@ flags.DEFINE_integer('num_examples_per_epoch', 120000,
 flags.DEFINE_integer('num_epochs', None, 'Number of epochs for training')
 flags.DEFINE_string('mode', 'train',
                     'Mode to run: train or eval (default: train)')
+flags.DEFINE_string('dali_path', '~/DALI/',
+                    'Path to DALI directory')
 flags.DEFINE_string('model_name', 'efficientdet-d1', 'Model name.')
 flags.DEFINE_bool('eval_after_training', False, 'Run one eval after the '
                   'training finishes.')
@@ -300,14 +305,10 @@ def main(_):
 
   elif FLAGS.mode == 'train_dali':
     from DALI.fn_pipeline import EfficientDetPipeline
-
-    print()
-    print("Currently reading files from DALI_EXTRA_PATH")
-    print()
-    dali_extra = os.environ['DALI_EXTRA_PATH']
-    file_root = os.path.join(dali_extra, 'db', 'coco', 'images')
-    annotations_file = os.path.join(dali_extra, 'db', 'coco', 'instances.json')
-
+    logging.info("Using DALI training pipeline")
+    
+    file_pattern = FLAGS.training_file_pattern
+    dali_path = FLAGS.dali_path
     batch_size = FLAGS.train_batch_size
     image_size = config.image_size
     num_threads = 1
@@ -315,12 +316,12 @@ def main(_):
     seed = int.from_bytes(os.urandom(4), 'little')
 
     pipeline = EfficientDetPipeline(
-        file_root, annotations_file,
+        dali_path, file_pattern,
         batch_size, image_size,
         num_threads, device_id, seed
     )
 
-    train_est.train(input_fn=pipeline, max_steps=train_steps)
+    #train_est.train(input_fn=pipeline, max_steps=train_steps)
 
   elif FLAGS.mode == 'eval':
     # Run evaluation when there's a new checkpoint

@@ -1,16 +1,27 @@
 import nvidia.dali as dali
 
-def input(file_root, annotations_file, device_id, num_threads, random_shuffle=True):
-    inputs, bboxes, classes = dali.fn.coco_reader(
-        file_root = file_root,
-        annotations_file = annotations_file,
-        ltrb = True,
+def input(tfrecord_files, tfrecord_idxs, device_id, num_threads, random_shuffle=True):
+    inputs = dali.fn.tfrecord_reader(
+        path=tfrecord_files,
+        index_path=tfrecord_idxs,
+        features = {
+            'image/encoded': dali.tfrecord.FixedLenFeature((), dali.tfrecord.string, ''),
+            'image/source_id': dali.tfrecord.FixedLenFeature((), dali.tfrecord.string, ''),
+            'image/height': dali.tfrecord.FixedLenFeature((), dali.tfrecord.int64, -1),
+            'image/width': dali.tfrecord.FixedLenFeature((), dali.tfrecord.int64, -1),
+            'image/object/bbox/xmin': dali.tfrecord.VarLenFeature(dali.tfrecord.float32),
+            'image/object/bbox/xmax': dali.tfrecord.VarLenFeature(dali.tfrecord.float32),
+            'image/object/bbox/ymin': dali.tfrecord.VarLenFeature(dali.tfrecord.float32),
+            'image/object/bbox/ymax': dali.tfrecord.VarLenFeature(dali.tfrecord.float32),
+            'image/object/class/label': dali.tfrecord.VarLenFeature(dali.tfrecord.int64),
+            'image/object/area': dali.tfrecord.VarLenFeature(dali.tfrecord.float32),
+            'image/object/is_crowd': dali.tfrecord.VarLenFeature(dali.tfrecord.int64)
+        },
         shard_id = device_id,
         num_shards = num_threads,
-        ratio = True,
-        random_shuffle = random_shuffle
-    )
-    images = dali.fn.image_decoder(inputs, device = 'cpu', output_type = dali.types.RGB)
+        random_shuffle = random_shuffle)
+    
+    images = dali.fn.image_decoder(inputs["image/encoded"], device = 'cpu', output_type = dali.types.RGB)
     return images, bboxes, classes
 
 def normalize_flip(images, bboxes, p = 0.5):
