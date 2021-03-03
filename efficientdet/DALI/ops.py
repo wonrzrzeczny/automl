@@ -9,19 +9,25 @@ def input(tfrecord_files, tfrecord_idxs, device_id, num_threads, random_shuffle=
             'image/source_id': dali.tfrecord.FixedLenFeature((), dali.tfrecord.string, ''),
             'image/height': dali.tfrecord.FixedLenFeature((), dali.tfrecord.int64, -1),
             'image/width': dali.tfrecord.FixedLenFeature((), dali.tfrecord.int64, -1),
-            'image/object/bbox/xmin': dali.tfrecord.VarLenFeature(dali.tfrecord.float32),
-            'image/object/bbox/xmax': dali.tfrecord.VarLenFeature(dali.tfrecord.float32),
-            'image/object/bbox/ymin': dali.tfrecord.VarLenFeature(dali.tfrecord.float32),
-            'image/object/bbox/ymax': dali.tfrecord.VarLenFeature(dali.tfrecord.float32),
-            'image/object/class/label': dali.tfrecord.VarLenFeature(dali.tfrecord.int64),
-            'image/object/area': dali.tfrecord.VarLenFeature(dali.tfrecord.float32),
-            'image/object/is_crowd': dali.tfrecord.VarLenFeature(dali.tfrecord.int64)
+            'image/object/bbox/xmin': dali.tfrecord.VarLenFeature(dali.tfrecord.float32, 0.0),
+            'image/object/bbox/xmax': dali.tfrecord.VarLenFeature(dali.tfrecord.float32, 0.0),
+            'image/object/bbox/ymin': dali.tfrecord.VarLenFeature(dali.tfrecord.float32, 0.0),
+            'image/object/bbox/ymax': dali.tfrecord.VarLenFeature(dali.tfrecord.float32, 0.0),
+            'image/object/class/label': dali.tfrecord.VarLenFeature(dali.tfrecord.int64, 0),
+            'image/object/area': dali.tfrecord.VarLenFeature(dali.tfrecord.float32, 0.0),
+            'image/object/is_crowd': dali.tfrecord.VarLenFeature(dali.tfrecord.int64, 0)
         },
         shard_id = device_id,
         num_shards = num_threads,
         random_shuffle = random_shuffle)
-    
+
     images = dali.fn.image_decoder(inputs["image/encoded"], device = 'cpu', output_type = dali.types.RGB)
+    xmin = inputs["image/object/bbox/xmin"]
+    xmax = inputs["image/object/bbox/xmax"]
+    ymin = inputs["image/object/bbox/ymin"]
+    ymax = inputs["image/object/bbox/ymax"]
+    bboxes = dali.fn.transpose(dali.fn.stack(xmin, ymin, xmax, ymax), perm=[1, 0])
+    classes = dali.fn.cast(inputs["image/object/class/label"], dtype=dali.types.INT32)
     return images, bboxes, classes
 
 def normalize_flip(images, bboxes, p = 0.5):

@@ -306,7 +306,7 @@ def main(_):
   elif FLAGS.mode == 'train_dali':
     from DALI.fn_pipeline import EfficientDetPipeline
     logging.info("Using DALI training pipeline")
-    
+
     file_pattern = FLAGS.training_file_pattern
     dali_path = FLAGS.dali_path
     batch_size = FLAGS.train_batch_size
@@ -321,7 +321,7 @@ def main(_):
         num_threads, device_id, seed
     )
 
-    #train_est.train(input_fn=pipeline, max_steps=train_steps)
+    train_est.train(input_fn=pipeline, max_steps=train_steps)
 
   elif FLAGS.mode == 'eval':
     # Run evaluation when there's a new checkpoint

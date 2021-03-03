@@ -22,11 +22,11 @@ class EfficientDetPipeline():
         self._image_size = image_size
         self._tfrecord_files = glob(file_pattern)
         self._tfrecord_idxs = [filename + "_idx" for filename in self._tfrecord_files]
-        tfrecord2idx_script = os.path.join(dali_path, 'tools', 'tfrecord2idx')
+        '''tfrecord2idx_script = os.path.join(dali_path, 'tools', 'tfrecord2idx')
         for tfrecord, tfrecord_idx in zip(self._tfrecord_files, self._tfrecord_idxs):
             if not os.path.isfile(tfrecord_idx):
                 logging.info(f"Generating index file for {tfrecord}")
-                call([tfrecord2idx_script, tfrecord, tfrecord_idx])
+                call([tfrecord2idx_script, tfrecord, tfrecord_idx])'''
 
         self._num_threads = num_threads
         self._device_id = device_id
