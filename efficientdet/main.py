@@ -23,6 +23,7 @@ from silence_tensorflow import silence_tensorflow
 #silence_tensorflow()
 #logging.set_verbosity(logging.WARNING)
 import tensorflow.compat.v1 as tf
+import tensorflow as tf2
 
 import dataloader
 import det_model_fn
@@ -49,6 +50,7 @@ flags.DEFINE_string('eval_name', default=None, help='Eval job name')
 flags.DEFINE_enum('strategy', None, ['tpu', 'gpus', ''],
                   'Training: gpus for multi-gpu, if None, use TF default.')
 
+flags.DEFINE_bool('use_dali', False, 'Use Nvidia DALI preprocessing pipelines.')
 flags.DEFINE_bool('use_fake_data', False, 'Use fake input.')
 flags.DEFINE_bool(
     'use_xla', False,
@@ -97,8 +99,6 @@ flags.DEFINE_integer('num_examples_per_epoch', 120000,
 flags.DEFINE_integer('num_epochs', None, 'Number of epochs for training')
 flags.DEFINE_string('mode', 'train',
                     'Mode to run: train or eval (default: train)')
-flags.DEFINE_string('dali_path', '~/DALI/',
-                    'Path to DALI directory')
 flags.DEFINE_string('model_name', 'efficientdet-d1', 'Model name.')
 flags.DEFINE_bool('eval_after_training', False, 'Run one eval after the '
                   'training finishes.')
@@ -275,9 +275,55 @@ def main(_):
         params=params)
     eval_est = train_est
   else:
-    strategy = None
     if FLAGS.strategy == 'gpus':
-      strategy = tf.distribute.MirroredStrategy()
+      strategy = tf.distribute.MirroredStrategy(devices=["/gpu:0"])
+
+      if FLAGS.use_dali:
+        from DALI.fn_pipeline import EfficientDetPipeline
+        logging.info("Using DALI pipeline")
+        
+        file_pattern = FLAGS.training_file_pattern
+        batch_size = FLAGS.train_batch_size
+        image_size = config.image_size
+        seed = int.from_bytes(os.urandom(4), 'little')
+
+        #def dali_dataset_fn(input_context):
+        #  with tf.device("/gpu:{}".format(input_context.input_pipeline_id)):
+        #    device_id = input_context.input_pipeline_id
+        #    return EfficientDetPipeline(
+        #      file_pattern,
+        #      batch_size, image_size, seed,
+        #      num_threads=4, device_id=device_id)
+
+        #input_options = tf2.distribute.InputOptions(
+        #  experimental_place_dataset_on_device = True,
+        #  experimental_prefetch_to_device = False,
+        #  experimental_replication_mode = tf.distribute.InputReplicationMode.PER_REPLICA)
+
+        #train_input_fn = strategy.distribute_datasets_from_function(dali_dataset_fn, input_options)
+        #eval_input_fn = strategy.distribute_datasets_from_function(dali_dataset_fn, input_options)
+
+        with tf.device('/gpu:0'):
+          train_input_fn = eval_input_fn = EfficientDetPipeline(
+              file_pattern,
+              batch_size, image_size, seed, num_threads=1, device_id=0)
+    else:
+      strategy = None
+
+      if FLAGS.use_dali:
+        from DALI.fn_pipeline import EfficientDetPipeline
+        logging.info("Using DALI pipeline with CPU")
+        
+        file_pattern = FLAGS.training_file_pattern
+        batch_size = FLAGS.train_batch_size
+        image_size = config.image_size
+        seed = int.from_bytes(os.urandom(4), 'little')
+        
+        with tf.device('/cpu:0'):
+          train_input_fn = eval_input_fn = EfficientDetPipeline(
+              file_pattern,
+              batch_size, image_size, seed)
+
     run_config = tf.estimator.RunConfig(
         model_dir=model_dir,
         train_distribute=strategy,
@@ -303,25 +349,6 @@ def main(_):
     if FLAGS.eval_after_training:
       eval_est.evaluate(input_fn=eval_input_fn, steps=eval_steps)
 
-  elif FLAGS.mode == 'train_dali':
-    from DALI.fn_pipeline import EfficientDetPipeline
-    logging.info("Using DALI training pipeline")
-
-    file_pattern = FLAGS.training_file_pattern
-    dali_path = FLAGS.dali_path
-    batch_size = FLAGS.train_batch_size
-    image_size = config.image_size
-    num_threads = 1
-    device_id = 0
-    seed = int.from_bytes(os.urandom(4), 'little')
-
-    pipeline = EfficientDetPipeline(
-        dali_path, file_pattern,
-        batch_size, image_size,
-        num_threads, device_id, seed
-    )
-
-    train_est.train(input_fn=pipeline, max_steps=train_steps)
 
   elif FLAGS.mode == 'eval':
     # Run evaluation when there's a new checkpoint

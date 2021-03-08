@@ -1,35 +1,28 @@
 import nvidia.dali as dali
 
 import nvidia.dali.plugin.tf as dali_tf
-import os.path
 import tensorflow as tf
 
 from absl import logging
 from glob import glob
 from keras import anchors
-from subprocess import call
-
 
 import DALI.ops as ops
 
 
 class EfficientDetPipeline():
-    def __init__(self, dali_path, file_pattern,
-                 batch_size, image_size,
-                 num_threads, device_id, seed):
+    def __init__(self, file_pattern,
+                 batch_size, image_size, seed,
+                 num_threads=1, device_id=None):
 
         self._batch_size = batch_size
         self._image_size = image_size
         self._tfrecord_files = glob(file_pattern)
         self._tfrecord_idxs = [filename + "_idx" for filename in self._tfrecord_files]
-        '''tfrecord2idx_script = os.path.join(dali_path, 'tools', 'tfrecord2idx')
-        for tfrecord, tfrecord_idx in zip(self._tfrecord_files, self._tfrecord_idxs):
-            if not os.path.isfile(tfrecord_idx):
-                logging.info(f"Generating index file for {tfrecord}")
-                call([tfrecord2idx_script, tfrecord, tfrecord_idx])'''
-
-        self._num_threads = num_threads
-        self._device_id = device_id
+       
+        self._num_shards = num_threads
+        self._shard_id = 0 if device_id is None else device_id
+        self._device = "cpu" if device_id is None else "gpu"
 
         self._anchors = anchors.Anchors(3, 7, 3, [1.0, 2.0, 0.5], 4.0, image_size)
         self._boxes = self._get_boxes()
@@ -57,12 +50,13 @@ class EfficientDetPipeline():
             images, bboxes, classes = ops.input(
                 self._tfrecord_files,
                 self._tfrecord_idxs,
-                self._device_id,
-                self._num_threads
+                device=self._device,
+                shard_id=self._shard_id,
+                num_shards=self._num_shards
             )
 
-            images, bboxes = ops.normalize_flip(images, bboxes)
-            images, bboxes, classes = ops.random_crop_resize_2(images, bboxes, classes, self._image_size)
+            images, bboxes = ops.normalize_flip(self._device, images, bboxes)
+            images, bboxes, classes = ops.random_crop_resize_2(self._device, images, bboxes, classes, self._image_size)
 
             enc_bboxes, enc_classes = dali.fn.box_encoder(bboxes, classes, anchors = self._boxes, offset = True)
             # split into layers by size
