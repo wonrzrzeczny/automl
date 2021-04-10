@@ -285,17 +285,15 @@ def detection_loss(cls_outputs, box_outputs, labels, params):
 
   return total_loss, cls_loss, box_loss
 
-
-def reg_l2_loss(weight_decay, regex=r'.*(kernel|weight):0$'):
+def reg_l2_loss(weight_decay, trainable_vars, regex=r'.*(kernel|weight):0$'):
   """Return regularization l2 loss loss."""
   var_match = re.compile(regex)
   return weight_decay * tf.add_n([
       tf.nn.l2_loss(v)
-      for v in tf.trainable_variables()
+      for v in trainable_vars
       if var_match.match(v.name)
   ])
-
-
+  
 @tf.autograph.experimental.do_not_convert
 def _model_fn(features, labels, mode, params, model, variable_filter_fn=None):
   """Model definition entry.
@@ -319,293 +317,39 @@ def _model_fn(features, labels, mode, params, model, variable_filter_fn=None):
   Raises:
     RuntimeError: if both ckpt and backbone_ckpt are set.
   """
+  
   is_tpu = params['strategy'] == 'tpu'
-  if params['img_summary_steps']:
-    utils.image('input_image', features, is_tpu)
-  training_hooks = []
-  params['is_training_bn'] = (mode == tf.estimator.ModeKeys.TRAIN)
+  with tf.GradientTape() as tape:
+    cls_out_list, box_out_list = model(features, params['is_training_bn'])
+    cls_outputs, box_outputs = {}, {}
+    for i in range(params['min_level'], params['max_level'] + 1):
+      cls_outputs[i] = cls_out_list[i - params['min_level']]
+      box_outputs[i] = box_out_list[i - params['min_level']]
 
-  if params['use_keras_model']:
+    levels = cls_outputs.keys()
+    for level in levels:
+      cls_outputs[level] = tf.cast(cls_outputs[level], tf.float32)
+      box_outputs[level] = tf.cast(box_outputs[level], tf.float32)
 
-    def model_fn(inputs):
-      model = efficientdet_keras.EfficientDetNet(
-          config=hparams_config.Config(params))
-      cls_out_list, box_out_list = model(inputs, params['is_training_bn'])
-      cls_outputs, box_outputs = {}, {}
-      for i in range(params['min_level'], params['max_level'] + 1):
-        cls_outputs[i] = cls_out_list[i - params['min_level']]
-        box_outputs[i] = box_out_list[i - params['min_level']]
-      return cls_outputs, box_outputs
-  else:
-    model_fn = functools.partial(model, config=hparams_config.Config(params))
+    # Set up training loss and learning rate.
+    update_learning_rate_schedule_parameters(params)
+    global_step = model.global_step
+    learning_rate = learning_rate_schedule(params, global_step)
 
-  precision = utils.get_precision(params['strategy'], params['mixed_precision'])
-  cls_outputs, box_outputs = utils.build_model_with_precision(
-      precision, model_fn, features, params['is_training_bn'])
+    # cls_loss and box_loss are for logging. only total_loss is optimized.
+    det_loss, cls_loss, box_loss = detection_loss(
+        cls_outputs, box_outputs, labels, params)
+    reg_l2loss = reg_l2_loss(params['weight_decay'], model.trainable_variables)
+    total_loss = det_loss + reg_l2loss
 
-  levels = cls_outputs.keys()
-  for level in levels:
-    cls_outputs[level] = tf.cast(cls_outputs[level], tf.float32)
-    box_outputs[level] = tf.cast(box_outputs[level], tf.float32)
+  trainable_vars = model.trainable_variables
+  gradients = tape.gradient(total_loss, trainable_vars)
+  model.optimizer.apply_gradients(zip(gradients, trainable_vars))
 
-  # Set up training loss and learning rate.
-  update_learning_rate_schedule_parameters(params)
-  global_step = tf.train.get_or_create_global_step()
-  learning_rate = learning_rate_schedule(params, global_step)
+  model.loss_tracker.update_state(total_loss)
+  return {'loss': total_loss}
 
-  # cls_loss and box_loss are for logging. only total_loss is optimized.
-  det_loss, cls_loss, box_loss = detection_loss(
-      cls_outputs, box_outputs, labels, params)
-  reg_l2loss = reg_l2_loss(params['weight_decay'])
-  total_loss = det_loss + reg_l2loss
-
-  if mode == tf.estimator.ModeKeys.TRAIN:
-    utils.scalar('lrn_rate', learning_rate, is_tpu)
-    utils.scalar('trainloss/cls_loss', cls_loss, is_tpu)
-    utils.scalar('trainloss/box_loss', box_loss, is_tpu)
-    utils.scalar('trainloss/det_loss', det_loss, is_tpu)
-    utils.scalar('trainloss/reg_l2_loss', reg_l2loss, is_tpu)
-    utils.scalar('trainloss/loss', total_loss, is_tpu)
-    train_epochs = tf.cast(global_step, tf.float32) / params['steps_per_epoch']
-    utils.scalar('train_epochs', train_epochs, is_tpu)
-
-  moving_average_decay = params['moving_average_decay']
-  if moving_average_decay:
-    ema = tf.train.ExponentialMovingAverage(
-        decay=moving_average_decay, num_updates=global_step)
-    ema_vars = utils.get_ema_vars()
-
-  if mode == tf.estimator.ModeKeys.TRAIN:
-    if params['optimizer'].lower() == 'sgd':
-      optimizer = tf.train.MomentumOptimizer(
-          learning_rate, momentum=params['momentum'])
-    elif params['optimizer'].lower() == 'adam':
-      optimizer = tf.train.AdamOptimizer(learning_rate)
-    else:
-      raise ValueError('optimizers should be adam or sgd')
-
-    if is_tpu:
-      optimizer = tf.tpu.CrossShardOptimizer(optimizer)
-
-    # Batch norm requires update_ops to be added as a train_op dependency.
-    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-    var_list = tf.trainable_variables()
-    if variable_filter_fn:
-      var_list = variable_filter_fn(var_list)
-
-    if params.get('clip_gradients_norm', None):
-      logging.info('clip gradients norm by %f', params['clip_gradients_norm'])
-      grads_and_vars = optimizer.compute_gradients(total_loss, var_list)
-      with tf.name_scope('clip'):
-        grads = [gv[0] for gv in grads_and_vars]
-        tvars = [gv[1] for gv in grads_and_vars]
-        # First clip each variable's norm, then clip global norm.
-        clip_norm = abs(params['clip_gradients_norm'])
-        clipped_grads = [
-            tf.clip_by_norm(g, clip_norm) if g is not None else None
-            for g in grads
-        ]
-        clipped_grads, _ = tf.clip_by_global_norm(clipped_grads, clip_norm)
-        utils.scalar('gradient_norm', tf.linalg.global_norm(clipped_grads),
-                     is_tpu)
-        grads_and_vars = list(zip(clipped_grads, tvars))
-
-      with tf.control_dependencies(update_ops):
-        train_op = optimizer.apply_gradients(grads_and_vars, global_step)
-    else:
-      with tf.control_dependencies(update_ops):
-        train_op = optimizer.minimize(
-            total_loss, global_step, var_list=var_list)
-
-    if moving_average_decay:
-      with tf.control_dependencies([train_op]):
-        train_op = ema.apply(ema_vars)
-
-  else:
-    train_op = None
-
-  eval_metrics = None
-  if mode == tf.estimator.ModeKeys.EVAL:
-
-    def metric_fn(**kwargs):
-      """Returns a dictionary that has the evaluation metrics."""
-      if params['nms_configs'].get('pyfunc', True):
-        detections_bs = []
-        nms_configs = params['nms_configs']
-        for index in range(kwargs['boxes'].shape[0]):
-          detections = tf.numpy_function(
-              functools.partial(nms_np.per_class_nms, nms_configs=nms_configs),
-              [
-                  kwargs['boxes'][index],
-                  kwargs['scores'][index],
-                  kwargs['classes'][index],
-                  tf.slice(kwargs['image_ids'], [index], [1]),
-                  tf.slice(kwargs['image_scales'], [index], [1]),
-                  params['num_classes'],
-                  nms_configs['max_output_size'],
-              ], tf.float32)
-          detections_bs.append(detections)
-        detections_bs = postprocess.transform_detections(
-            tf.stack(detections_bs))
-      else:
-        # These two branches should be equivalent, but currently they are not.
-        # TODO(tanmingxing): enable the non_pyfun path after bug fix.
-        nms_boxes, nms_scores, nms_classes, _ = postprocess.per_class_nms(
-            params, kwargs['boxes'], kwargs['scores'], kwargs['classes'],
-            kwargs['image_scales'])
-        img_ids = tf.cast(
-            tf.expand_dims(kwargs['image_ids'], -1), nms_scores.dtype)
-        detections_bs = [
-            img_ids * tf.ones_like(nms_scores),
-            nms_boxes[:, :, 1],
-            nms_boxes[:, :, 0],
-            nms_boxes[:, :, 3] - nms_boxes[:, :, 1],
-            nms_boxes[:, :, 2] - nms_boxes[:, :, 0],
-            nms_scores,
-            nms_classes,
-        ]
-        detections_bs = tf.stack(detections_bs, axis=-1, name='detnections')
-
-      if params.get('testdev_dir', None):
-        logging.info('Eval testdev_dir %s', params['testdev_dir'])
-        eval_metric = coco_metric.EvaluationMetric(
-            testdev_dir=params['testdev_dir'])
-        coco_metrics = eval_metric.estimator_metric_fn(detections_bs,
-                                                       tf.zeros([1]))
-      else:
-        logging.info('Eval val with groudtruths %s.', params['val_json_file'])
-        eval_metric = coco_metric.EvaluationMetric(
-            filename=params['val_json_file'], label_map=params['label_map'])
-        coco_metrics = eval_metric.estimator_metric_fn(
-            detections_bs, kwargs['groundtruth_data'])
-
-      # Add metrics to output.
-      cls_loss = tf.metrics.mean(kwargs['cls_loss_repeat'])
-      box_loss = tf.metrics.mean(kwargs['box_loss_repeat'])
-      output_metrics = {
-          'cls_loss': cls_loss,
-          'box_loss': box_loss,
-      }
-      output_metrics.update(coco_metrics)
-      return output_metrics
-
-    cls_loss_repeat = tf.reshape(
-        tf.tile(tf.expand_dims(cls_loss, 0), [
-            params['batch_size'],
-        ]), [params['batch_size'], 1])
-    box_loss_repeat = tf.reshape(
-        tf.tile(tf.expand_dims(box_loss, 0), [
-            params['batch_size'],
-        ]), [params['batch_size'], 1])
-
-    cls_outputs = postprocess.to_list(cls_outputs)
-    box_outputs = postprocess.to_list(box_outputs)
-    params['nms_configs']['max_nms_inputs'] = anchors.MAX_DETECTION_POINTS
-    boxes, scores, classes = postprocess.pre_nms(params, cls_outputs,
-                                                 box_outputs)
-    metric_fn_inputs = {
-        'cls_loss_repeat': cls_loss_repeat,
-        'box_loss_repeat': box_loss_repeat,
-        'image_ids': labels['source_ids'],
-        'groundtruth_data': labels['groundtruth_data'],
-        'image_scales': labels['image_scales'],
-        'boxes': boxes,
-        'scores': scores,
-        'classes': classes,
-    }
-    eval_metrics = (metric_fn, metric_fn_inputs)
-
-  checkpoint = params.get('ckpt') or params.get('backbone_ckpt')
-
-  if checkpoint and mode == tf.estimator.ModeKeys.TRAIN:
-    # Initialize the model from an EfficientDet or backbone checkpoint.
-    if params.get('ckpt') and params.get('backbone_ckpt'):
-      raise RuntimeError(
-          '--backbone_ckpt and --checkpoint are mutually exclusive')
-
-    if params.get('backbone_ckpt'):
-      var_scope = params['backbone_name'] + '/'
-      if params['ckpt_var_scope'] is None:
-        # Use backbone name as default checkpoint scope.
-        ckpt_scope = params['backbone_name'] + '/'
-      else:
-        ckpt_scope = params['ckpt_var_scope'] + '/'
-    else:
-      # Load every var in the given checkpoint
-      var_scope = ckpt_scope = '/'
-
-    def scaffold_fn():
-      """Loads pretrained model through scaffold function."""
-      logging.info('restore variables from %s', checkpoint)
-
-      var_map = utils.get_ckpt_var_map(
-          ckpt_path=checkpoint,
-          ckpt_scope=ckpt_scope,
-          var_scope=var_scope,
-          skip_mismatch=params['skip_mismatch'])
-
-      tf.train.init_from_checkpoint(checkpoint, var_map)
-      return tf.train.Scaffold()
-  elif mode == tf.estimator.ModeKeys.EVAL and moving_average_decay:
-
-    def scaffold_fn():
-      """Load moving average variables for eval."""
-      logging.info('Load EMA vars with ema_decay=%f', moving_average_decay)
-      restore_vars_dict = ema.variables_to_restore(ema_vars)
-      saver = tf.train.Saver(restore_vars_dict)
-      return tf.train.Scaffold(saver=saver)
-  else:
-    scaffold_fn = None
-
-  if is_tpu:
-    return tf.estimator.tpu.TPUEstimatorSpec(
-        mode=mode,
-        loss=total_loss,
-        train_op=train_op,
-        eval_metrics=eval_metrics,
-        host_call=utils.get_tpu_host_call(global_step, params),
-        scaffold_fn=scaffold_fn,
-        training_hooks=training_hooks)
-  else:
-    # Profile every 1K steps.
-    if params.get('profile', False):
-      profile_hook = tf.estimator.ProfilerHook(
-          save_steps=1000, output_dir=params['model_dir'], show_memory=True)
-      training_hooks.append(profile_hook)
-
-      # Report memory allocation if OOM; it will slow down the running.
-      class OomReportingHook(tf.estimator.SessionRunHook):
-
-        def before_run(self, run_context):
-          return tf.estimator.SessionRunArgs(
-              fetches=[],
-              options=tf.RunOptions(report_tensor_allocations_upon_oom=True))
-
-      training_hooks.append(OomReportingHook())
-
-    logging_hook = tf.estimator.LoggingTensorHook(
-        {
-            'step': global_step,
-            'det_loss': det_loss,
-            'cls_loss': cls_loss,
-            'box_loss': box_loss,
-        },
-        every_n_iter=params.get('iterations_per_loop', 100),
-    )
-    training_hooks.append(logging_hook)
-
-    eval_metric_ops = (
-        eval_metrics[0](**eval_metrics[1]) if eval_metrics else None)
-    return tf.estimator.EstimatorSpec(
-        mode=mode,
-        loss=total_loss,
-        train_op=train_op,
-        eval_metric_ops=eval_metric_ops,
-        scaffold=scaffold_fn() if scaffold_fn else None,
-        training_hooks=training_hooks)
-
-
-def efficientdet_model_fn(features, labels, mode, params):
+def efficientdet_model_fn(features, labels, mode, params, model):
   """EfficientDet model."""
   variable_filter_fn = functools.partial(
       efficientdet_arch.freeze_vars, pattern=params['var_freeze_expr'])
@@ -614,7 +358,7 @@ def efficientdet_model_fn(features, labels, mode, params):
       labels,
       mode,
       params,
-      model=efficientdet_arch.efficientdet,
+      model=model,
       variable_filter_fn=variable_filter_fn)
 
 

@@ -27,6 +27,7 @@ from keras import fpn_configs
 from keras import postprocess
 from keras import tfmot
 from keras import util_keras
+import det_model_fn
 # pylint: disable=arguments-differ  # fo keras layers.
 
 
@@ -752,12 +753,19 @@ class FPNCell(tf.keras.layers.Layer):
 class EfficientDetNet(tf.keras.Model):
   """EfficientDet keras network without pre/post-processing."""
 
-  def __init__(self, model_name=None, config=None, name=''):
+  def __init__(self, model_name=None, params=None, name=''):
     """Initialize model."""
     super().__init__(name=name)
 
-    config = config or hparams_config.get_efficientdet_config(model_name)
+    if params:
+      config = hparams_config.Config(params)
+    else:
+      config = hparams_config.get_efficientdet_config(model_name)
+    self.params = params
     self.config = config
+    self.global_step = tf.Variable(0, name='global_step', trainable=False)
+    self.global_step.assign(0)
+    self.loss_tracker = tf.keras.metrics.Mean(name='loss')
 
     # Backbone.
     backbone_name = config.backbone_name
@@ -874,6 +882,14 @@ class EfficientDetNet(tf.keras.Model):
       outputs.append(seg_outputs)
     return tuple(outputs)
 
+  def train_step(self, data):
+    features, labels = data
+    return det_model_fn.efficientdet_model_fn(
+        features, labels, tf.estimator.ModeKeys.TRAIN, self.params, self)
+
+  @property
+  def metrics(self):
+    return [self.loss_tracker]
 
 class EfficientDetModel(EfficientDetNet):
   """EfficientDet full keras model with pre and post processing."""

@@ -30,6 +30,8 @@ import det_model_fn
 import hparams_config
 import utils
 
+from keras import efficientdet_keras
+
 flags.DEFINE_string(
     'tpu',
     default=None,
@@ -340,12 +342,14 @@ def main(_):
           model_fn=model_fn_instance, config=run_config, params=params)
 
     # train and eval need different estimator due to different batch size.
-    train_est = get_estimator(FLAGS.train_batch_size)
-    eval_est = get_estimator(FLAGS.eval_batch_size)
+    #train_est = get_estimator(FLAGS.train_batch_size)
+    #eval_est = get_estimator(FLAGS.eval_batch_size)
 
   # start train/eval flow.
   if FLAGS.mode == 'train':
-    train_est.train(input_fn=train_input_fn, max_steps=train_steps)
+    model = efficientdet_keras.EfficientDetNet(params=params)
+    model.compile(optimizer='adam')
+    model.fit(x=train_input_fn(params), epochs=2, steps_per_epoch=10)
     if FLAGS.eval_after_training:
       eval_est.evaluate(input_fn=eval_input_fn, steps=eval_steps)
 
