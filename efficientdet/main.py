@@ -338,12 +338,12 @@ def main(_):
     def get_estimator(global_batch_size):
       params['num_shards'] = getattr(strategy, 'num_replicas_in_sync', 1)
       params['batch_size'] = global_batch_size // params['num_shards']
-      return tf.estimator.Estimator(
-          model_fn=model_fn_instance, config=run_config, params=params)
+      #return tf.estimator.Estimator(
+          #model_fn=model_fn_instance, config=run_config, params=params)
 
     # train and eval need different estimator due to different batch size.
-    #train_est = get_estimator(FLAGS.train_batch_size)
-    #eval_est = get_estimator(FLAGS.eval_batch_size)
+    train_est = get_estimator(FLAGS.train_batch_size)
+    eval_est = get_estimator(FLAGS.eval_batch_size)
 
   # start train/eval flow.
   if FLAGS.mode == 'train':

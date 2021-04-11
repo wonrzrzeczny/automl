@@ -96,20 +96,6 @@ class EfficientDetPipeline():
 
         return enc_bboxes_layers, enc_classes_layers
 
-
-    def _format_data(self, batch_size, images, *cls_box_args):
-        labels = {}
-
-        for level in range(self._anchors.min_level, self._anchors.max_level + 1):
-            i = 2 * (level - self._anchors.min_level)
-            labels['cls_targets_%d' % level] = cls_box_args[i]
-            labels['box_targets_%d' % level] = cls_box_args[i + 1]
-
-        labels['mean_num_positives'] = 0.0
-
-        return images, labels
-
-
     def __call__(self, params):
         output_shapes = [(self._batch_size, self._image_size[0], self._image_size[1], 3)]
         output_dtypes = [tf.float32]
@@ -129,8 +115,7 @@ class EfficientDetPipeline():
             output_shapes=tuple(output_shapes),
             output_dtypes=tuple(output_dtypes)
         )
-        dataset = dataset.map(
-            lambda *args: self._format_data(self._batch_size, *args))
+        dataset = dataset.map(lambda *args: args + (0.0,))
 
         return dataset
 

@@ -883,7 +883,13 @@ class EfficientDetNet(tf.keras.Model):
     return tuple(outputs)
 
   def train_step(self, data):
-    features, labels = data
+    features = data[0]
+    labels = {}
+    for level in range(self.params['min_level'], self.params['max_level'] + 1):
+      i = 2 * (level - self.params['min_level'])
+      labels['cls_targets_%d' % level] = data[i + 1]
+      labels['box_targets_%d' % level] = data[i + 2]
+    labels['mean_num_positives'] = data[-1]
     return det_model_fn.efficientdet_model_fn(
         features, labels, tf.estimator.ModeKeys.TRAIN, self.params, self)
 

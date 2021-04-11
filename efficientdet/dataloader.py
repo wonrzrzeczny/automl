@@ -364,29 +364,17 @@ class InputReader:
     labels = {}
     # Count num_positives in a batch.
     num_positives_batch = tf.reduce_mean(num_positives)
-    labels['mean_num_positives'] = tf.reshape(
+    mean_num_positives = tf.reshape(
         tf.tile(tf.expand_dims(num_positives_batch, 0), [
             batch_size,
         ]), [batch_size, 1])
 
-    if params['data_format'] == 'channels_first':
-      images = tf.transpose(images, [0, 3, 1, 2])
-
+    data = [images]
     for level in range(params['min_level'], params['max_level'] + 1):
-      labels['cls_targets_%d' % level] = cls_targets[level]
-      labels['box_targets_%d' % level] = box_targets[level]
-      if params['data_format'] == 'channels_first':
-        labels['cls_targets_%d' % level] = tf.transpose(
-            labels['cls_targets_%d' % level], [0, 3, 1, 2])
-        labels['box_targets_%d' % level] = tf.transpose(
-            labels['box_targets_%d' % level], [0, 3, 1, 2])
-    # Concatenate groundtruth annotations to a tensor.
-    groundtruth_data = tf.concat([boxes, is_crowds, areas, classes], axis=2)
-    labels['source_ids'] = source_ids
-    labels['groundtruth_data'] = groundtruth_data
-    labels['image_scales'] = image_scales
-    labels['image_masks'] = image_masks
-    return images, labels
+      data.append(cls_targets[level])
+      data.append(box_targets[level])
+    data.append(num_positives)
+    return tuple(data)
 
   @property
   def dataset_options(self):
