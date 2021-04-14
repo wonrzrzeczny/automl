@@ -65,7 +65,9 @@ class EfficientDetPipeline():
             # interleave enc_bboxes_layers and enc_classes_layers
             enc_layers = [item for pair in zip(enc_classes_layers, enc_bboxes_layers) for item in pair]
 
-            self._pipe.set_outputs(images, *enc_layers)
+            mean_num_positives = 0.0
+
+            self._pipe.set_outputs(images, *enc_layers, mean_num_positives)
 
 
     def _unpack_labels(self, enc_bboxes, enc_classes):
@@ -109,13 +111,15 @@ class EfficientDetPipeline():
             output_dtypes.append(tf.int32)
             output_dtypes.append(tf.float32)
 
+        output_shapes.append((self._batch_size, 1))
+        output_dtypes.append(tf.float32)
+
         dataset = dali_tf.DALIDataset(
             pipeline = self._pipe,
             batch_size = self._batch_size,
             output_shapes=tuple(output_shapes),
             output_dtypes=tuple(output_dtypes)
         )
-        dataset = dataset.map(lambda *args: args + (0.0,))
 
         return dataset
 
