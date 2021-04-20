@@ -59,15 +59,16 @@ class EfficientDetPipeline():
             images, bboxes, classes = ops.random_crop_resize_2(self._device, images, bboxes, classes, self._image_size)
 
             enc_bboxes, enc_classes = dali.fn.box_encoder(bboxes, classes, anchors = self._boxes, offset = True)
+            to_01 = dali.fn.cast(enc_bboxes != 0, dtype=dali.types.FLOAT)
+            num_positives = dali.fn.reductions.max(dali.fn.reductions.sum(dali.fn.reshape(to_01, [-1, 4]), axes = 0))
             # split into layers by size
             enc_bboxes_layers, enc_classes_layers = self._unpack_labels(enc_bboxes, enc_classes)
 
             # interleave enc_bboxes_layers and enc_classes_layers
             enc_layers = [item for pair in zip(enc_classes_layers, enc_bboxes_layers) for item in pair]
 
-            mean_num_positives = 0.0
 
-            self._pipe.set_outputs(images, *enc_layers, mean_num_positives)
+            self._pipe.set_outputs(images, *enc_layers, num_positives)
 
 
     def _unpack_labels(self, enc_bboxes, enc_classes):
@@ -111,7 +112,7 @@ class EfficientDetPipeline():
             output_dtypes.append(tf.int32)
             output_dtypes.append(tf.float32)
 
-        output_shapes.append((self._batch_size, 1))
+        output_shapes.append((self._batch_size,))
         output_dtypes.append(tf.float32)
 
         dataset = dali_tf.DALIDataset(

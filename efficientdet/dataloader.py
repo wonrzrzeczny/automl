@@ -361,14 +361,6 @@ class InputReader:
                       box_targets, num_positives, source_ids, image_scales,
                       boxes, is_crowds, areas, classes, image_masks):
     """Processes one batch of data."""
-    labels = {}
-    # Count num_positives in a batch.
-    num_positives_batch = tf.reduce_mean(num_positives)
-    mean_num_positives = tf.reshape(
-        tf.tile(tf.expand_dims(num_positives_batch, 0), [
-            batch_size,
-        ]), [batch_size, 1])
-
     data = [images]
     for level in range(params['min_level'], params['max_level'] + 1):
       data.append(cls_targets[level])

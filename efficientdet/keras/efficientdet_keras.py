@@ -889,7 +889,14 @@ class EfficientDetNet(tf.keras.Model):
       i = 2 * (level - self.params['min_level'])
       labels['cls_targets_%d' % level] = data[i + 1]
       labels['box_targets_%d' % level] = data[i + 2]
-    labels['mean_num_positives'] = data[-1]
+
+    batch_size = self.params['batch_size']
+    mean_batch = tf.reduce_mean(data[-1])
+    labels['mean_num_positives'] = tf.reshape(
+        tf.tile(tf.expand_dims(mean_batch, 0), [batch_size]), [batch_size, 1])
+      
+    tf.print(data[-1])
+    #tf.print(data[1])
     return det_model_fn.efficientdet_model_fn(
         features, labels, tf.estimator.ModeKeys.TRAIN, self.params, self)
 
